@@ -54,8 +54,9 @@ jobs:
         shell: bash
         run: |
           set -e
+          rm -rf extracted-ground-up
           mkdir -p extracted-ground-up
-          unzip -o ground-up.zip -d extracted-ground-up
+          unzip -q -o ground-up.zip -d extracted-ground-up
 
           if [ -f extracted-ground-up/settings.gradle.kts ] && \
              [ -f extracted-ground-up/app/build.gradle.kts ]; then
@@ -64,17 +65,17 @@ jobs:
                [ -f extracted-ground-up/ground-up/app/build.gradle.kts ]; then
             echo "PROJECT_DIR=extracted-ground-up/ground-up" >> "$GITHUB_ENV"
           else
-            echo "Could not locate the Ground Up Gradle project in the ZIP."
-            echo "Extracted file listing:"
-            find extracted-ground-up -maxdepth 4 -type f | sort | head -200
+            echo "Could not locate the Ground Up Gradle project."
+            find extracted-ground-up -maxdepth 5 -type f | sort | head -200
             exit 1
           fi
 
-      - name: Verify Android project
+      - name: Verify project and enable AndroidX
         shell: bash
         run: |
           set -e
           test -f "$PROJECT_DIR/settings.gradle.kts"
+          test -f "$PROJECT_DIR/build.gradle.kts"
           test -f "$PROJECT_DIR/app/build.gradle.kts"
           test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
           touch "$PROJECT_DIR/gradle.properties"
@@ -88,11 +89,28 @@ jobs:
           cd "$PROJECT_DIR"
           gradle --no-daemon testDebugUnitTest lintDebug assembleDebug
 
-      - name: Upload APK
+      - name: Verify APK and create checksum
+        shell: bash
+        run: |
+          set -e
+          APK_PATH="$(find extracted-ground-up -type f \
+            -path '*/app/build/outputs/apk/debug/app-debug.apk' | head -n 1)"
+          if [ -z "$APK_PATH" ]; then
+            echo "Debug APK was not produced"
+            exit 1
+          fi
+          mkdir -p dist
+          cp "$APK_PATH" dist/ground-up-debug.apk
+          cd dist
+          sha256sum ground-up-debug.apk > ground-up-debug.apk.sha256
+
+      - name: Upload APK and checksum
         uses: actions/upload-artifact@v4
         with:
           name: ground-up-debug-apk
-          path: extracted-ground-up/**/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            dist/ground-up-debug.apk
+            dist/ground-up-debug.apk.sha256
           if-no-files-found: error
           retention-days: 14
           
