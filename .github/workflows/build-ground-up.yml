@@ -1,0 +1,85 @@
+
+name: Build Ground Up APK
+
+"on":
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          set -e
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "Android SDK manager not found"
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Verify source ZIP
+        shell: bash
+        run: |
+          set -e
+          test -f ground-up.zip || {
+            echo "ground-up.zip must be in the repository root"
+            exit 1
+          }
+          unzip -t ground-up.zip
+
+      - name: Extract Ground Up
+        run: unzip -o ground-up.zip
+
+      - name: Enable AndroidX
+        working-directory: ground-up
+        shell: bash
+        run: |
+          set -e
+          touch gradle.properties
+          grep -qxF 'android.useAndroidX=true' gradle.properties || \
+            echo 'android.useAndroidX=true' >> gradle.properties
+
+      - name: Verify Android project
+        shell: bash
+        run: |
+          set -e
+          test -f ground-up/settings.gradle.kts
+          test -f ground-up/build.gradle.kts
+          test -f ground-up/app/build.gradle.kts
+          test -f ground-up/app/src/main/AndroidManifest.xml
+
+      - name: Test, lint, and build APK
+        working-directory: ground-up
+        run: gradle --no-daemon testDebugUnitTest lintDebug assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ground-up-debug-apk
+          path: ground-up/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+          
