@@ -51,35 +51,48 @@ jobs:
           unzip -t ground-up.zip
 
       - name: Extract Ground Up
-        run: unzip -o ground-up.zip
-
-      - name: Enable AndroidX
-        working-directory: ground-up
         shell: bash
         run: |
           set -e
-          touch gradle.properties
-          grep -qxF 'android.useAndroidX=true' gradle.properties || \
-            echo 'android.useAndroidX=true' >> gradle.properties
+          mkdir -p extracted-ground-up
+          unzip -o ground-up.zip -d extracted-ground-up
+
+          if [ -f extracted-ground-up/settings.gradle.kts ] && \
+             [ -f extracted-ground-up/app/build.gradle.kts ]; then
+            echo "PROJECT_DIR=extracted-ground-up" >> "$GITHUB_ENV"
+          elif [ -f extracted-ground-up/ground-up/settings.gradle.kts ] && \
+               [ -f extracted-ground-up/ground-up/app/build.gradle.kts ]; then
+            echo "PROJECT_DIR=extracted-ground-up/ground-up" >> "$GITHUB_ENV"
+          else
+            echo "Could not locate the Ground Up Gradle project in the ZIP."
+            echo "Extracted file listing:"
+            find extracted-ground-up -maxdepth 4 -type f | sort | head -200
+            exit 1
+          fi
 
       - name: Verify Android project
         shell: bash
         run: |
           set -e
-          test -f ground-up/settings.gradle.kts
-          test -f ground-up/build.gradle.kts
-          test -f ground-up/app/build.gradle.kts
-          test -f ground-up/app/src/main/AndroidManifest.xml
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          test -f "$PROJECT_DIR/app/build.gradle.kts"
+          test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          touch "$PROJECT_DIR/gradle.properties"
+          grep -qxF 'android.useAndroidX=true' "$PROJECT_DIR/gradle.properties" || \
+            echo 'android.useAndroidX=true' >> "$PROJECT_DIR/gradle.properties"
 
       - name: Test, lint, and build APK
-        working-directory: ground-up
-        run: gradle --no-daemon testDebugUnitTest lintDebug assembleDebug
+        shell: bash
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+          gradle --no-daemon testDebugUnitTest lintDebug assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ground-up-debug-apk
-          path: ground-up/app/build/outputs/apk/debug/app-debug.apk
+          path: extracted-ground-up/**/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
           
